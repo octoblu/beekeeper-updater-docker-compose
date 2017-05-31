@@ -72,11 +72,15 @@ script_directory(){
 }
 
 usage(){
-  echo "USAGE: ${SCRIPT_NAME}"
+  echo 'USAGE:'
+  echo "  ${SCRIPT_NAME} [OPTIONS]"
   echo ''
-  echo 'Description: ...'
+  echo 'DESCRIPTION:'
+  echo '  Pulls down a git repository and updates the docker images in the'
+  echo '  indicated docker-compose.yml file to match what the beekeeper'
+  echo '  says.'
   echo ''
-  echo 'Arguments:'
+  echo 'OPTIONS:'
   echo '  -b, --beekeeper-url  url to beekeeper, including auth'
   echo '                       (env: BEEKEEPER_URL)'
   echo '  -h, --help           Print this help text'
@@ -94,7 +98,7 @@ usage(){
   echo '                       (env: SINGLE_RUN="true")'
   echo '  -v, --version        print the version'
   echo ''
-  echo 'Environment:'
+  echo 'ENVIRONMENT:'
   echo '  DEBUG            print debug output'
   echo ''
   echo ''
