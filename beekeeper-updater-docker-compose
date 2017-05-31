@@ -76,15 +76,16 @@ usage(){
   echo 'Arguments:'
   echo '  -b, --beekeeper-url  url to beekeeper, including auth'
   echo '                       (env: BEEKEEPER_URL)'
-  echo '  -h, --help           print this help text'
-  echo '  -p, --path           path within the github repository where the'
+  echo '  -h, --help           Print this help text'
+  echo '  -p, --path           Path within the github repository where the'
   echo '                       docker-compose.yml file is located relative to'
   echo '                       the repo root. (env: DOCKER_COMPOSE_YAML_PATH)'
-  echo '  -r, --repo           the github repository where the docker-compose.yml'
+  echo '  -r, --repo           Github repository where the docker-compose.yml'
   echo '                       file is located. Auth information can be included'
   echo '                       here using standard the basic auth format:'
   echo '                       https://<user>:<password/token>@github.com/<org>/<project>'
   echo '                       (env: GITHUB_REPO)'
+  echo '  -s, --single-run     Do a single run instead of running in infinite mode'
   echo '  -v, --version        print the version'
   echo ''
   echo 'Environment:'
@@ -226,6 +227,10 @@ run() {
   && git push > /dev/null
 }
 
+run_forever() {
+
+}
+
 setup() {
   local exit_code git_clone_output github_repo repo_dir
   repo_dir="$1"
@@ -302,6 +307,9 @@ main() {
         github_repo="$value"
         shift
         ;;
+      -s | --single-run)
+        single_run='true'
+        ;;
       # Arg with value
       # -x | --example)
       #   example="$value"
@@ -339,7 +347,7 @@ main() {
 
   pushd "$repo_dir" > /dev/null
 
-  run "$beekeeper_url" "$docker_compose_yaml_path"
+  run_forever "$beekeeper_url" "$docker_compose_yaml_path"
 }
 
 main "$@"
