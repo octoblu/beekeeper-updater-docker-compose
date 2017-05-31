@@ -47,7 +47,10 @@ matches_debug() {
   if [ -z "$DEBUG" ]; then
     return 1
   fi
-  if [[ $SCRIPT_NAME == "$DEBUG" ]]; then
+
+  # we actually *do* want glob match
+  # shellcheck disable=SC2053
+  if [[ $SCRIPT_NAME == $DEBUG ]]; then
     return 0
   fi
   return 1
@@ -77,6 +80,8 @@ usage(){
   echo '  -b, --beekeeper-url  url to beekeeper, including auth'
   echo '                       (env: BEEKEEPER_URL)'
   echo '  -h, --help           Print this help text'
+  echo '  -i, --interval       Time between runs in seconds. Defaults to "60"'
+  echo '                       (env: INTERVAL)'
   echo '  -p, --path           Path within the github repository where the'
   echo '                       docker-compose.yml file is located relative to'
   echo '                       the repo root. (env: DOCKER_COMPOSE_YAML_PATH)'
@@ -86,6 +91,7 @@ usage(){
   echo '                       https://<user>:<password/token>@github.com/<org>/<project>'
   echo '                       (env: GITHUB_REPO)'
   echo '  -s, --single-run     Do a single run instead of running in infinite mode'
+  echo '                       (env: SINGLE_RUN="true")'
   echo '  -v, --version        print the version'
   echo ''
   echo 'Environment:'
@@ -129,7 +135,7 @@ fetch_beekeeper() {
   if [ "$curl_exit_code" != "0" ]; then
     echo "$curl_stderr" \
     | grep "The requested URL returned error: 404 Not Found" &> /dev/null \
-    && err_echo "$beekeeper_path not known to beekeeper, skipping" \
+    && debug "$beekeeper_path not known to beekeeper, skipping" \
     && return 0
 
     err_echo "failed to identify the expected image from beekeeper: $curl_stdout $curl_stderr"
@@ -200,20 +206,18 @@ get_services() {
 }
 
 run() {
-  local beekeeper_url docker_compose_yaml_path exit_code git_pull_output services
+  debug "run"
+  local beekeeper_url docker_compose_yaml_path services
   beekeeper_url="$1"
   docker_compose_yaml_path="$2"
 
-  git_pull_output="$(git pull 2>&1)"
-  exit_code=$?
-  if [ "$exit_code" != "0" ]; then
-    err_echo "$git_pull_output"
-    return 1
-  fi
+  debug "updating repository"
+  git pull --quiet || return 1
 
   services=( $(get_services "$docker_compose_yaml_path") ) || return 1
 
   for service in "${services[@]}"; do
+    debug "service: $service"
     update_service "$beekeeper_url" "$docker_compose_yaml_path" "$service" || return 1
   done
 
@@ -222,23 +226,33 @@ run() {
   fi
 
   git add "$docker_compose_yaml_path" \
-  && git pull > /dev/null \
-  && git commit --message "Updated: $docker_compose_yaml_path" > /dev/null \
-  && git push > /dev/null
+  && git pull --quiet \
+  && git commit --quiet --message "Updated: $docker_compose_yaml_path" > /dev/null \
+  && git push --quiet
 }
 
 run_forever() {
+  local beekeeper_url docker_compose_yaml_path interval
+  interval="$1"
+  beekeeper_url="$2"
+  docker_compose_yaml_path="$3"
 
+  while true; do
+    run "$beekeeper_url" "$docker_compose_yaml_path" || exit 1
+    debug "sleeping for ${interval}s"
+    sleep "$interval"
+  done
 }
 
 setup() {
+  debug 'setup'
   local exit_code git_clone_output github_repo repo_dir
   repo_dir="$1"
   github_repo="$2"
 
   git config --global user.email "updater@example.com"
   git config --global user.name "beekeeper-updater-docker-compose "
-  git_clone_output="$(git clone --depth=1 "$github_repo" "$repo_dir" 2>&1)"
+  git_clone_output="$(git clone --quiet --depth=1 "$github_repo" "$repo_dir")"
   exit_code=$?
 
   if [ "$exit_code" != "0" ]; then
@@ -258,9 +272,11 @@ update_service() {
   expected_image="$(get_expected_image "$beekeeper_url" "$current_image")" || return 1
 
   if [ -z "$expected_image" ] || [ "$current_image" == "$expected_image" ]; then
+    debug "up to date, skipping"
     return 0
   fi
 
+  debug "updating $service_name from '$current_image' to '$expected_image'"
   update_with_expected_image "$docker_compose_yaml_path" "$service_name" "$expected_image"
 }
 
@@ -281,7 +297,7 @@ update_with_expected_image() {
 
 # main execution function
 main() {
-  local beekeeper_url docker_compose_yaml_path github_repo repo_dir
+  local beekeeper_url docker_compose_yaml_path github_repo interval repo_dir single_run
   # Define args up here
   while [ "$1" != "" ]; do
     local param="$1"
@@ -297,6 +313,10 @@ main() {
         ;;
       -b | --beekeeper-url)
         beekeeper_url="$value"
+        shift
+        ;;
+      -i | --interval)
+        interval="$value"
         shift
         ;;
       -p | --path)
@@ -339,7 +359,13 @@ main() {
   beekeeper_url="${beekeeper_url:-$BEEKEEPER_URL}"
   docker_compose_yaml_path="${docker_compose_yaml_path:-$DOCKER_COMPOSE_YAML_PATH}"
   github_repo="${github_repo:-$GITHUB_REPO}"
+  interval="${interval:-$INTERVAL}"
+  interval="${interval:-60}"
   repo_dir="$PWD/repository"
+
+  if [ -z "$single_run" ] && [ "$SINGLE_RUN" == "true" ]; then
+    single_run="true"
+  fi
 
   assert_required_params "$beekeeper_url" "$docker_compose_yaml_path" "$github_repo"
 
@@ -347,7 +373,11 @@ main() {
 
   pushd "$repo_dir" > /dev/null
 
-  run_forever "$beekeeper_url" "$docker_compose_yaml_path"
+  if [ "$single_run" == "true" ]; then
+    run "$beekeeper_url" "$docker_compose_yaml_path"
+    exit $?
+  fi
+  run_forever "$interval" "$beekeeper_url" "$docker_compose_yaml_path"
 }
 
 main "$@"
