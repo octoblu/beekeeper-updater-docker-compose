@@ -117,15 +117,20 @@ version(){
 
 # App functions
 fetch_beekeeper() {
-  local beekeeper_path beekeeper_url curl_exit_code curl_stderr_path curl_stdout_path curl_stderr curl_stdout
+  local beekeeper_path beekeeper_url curl_exit_code curl_stderr_path curl_stdout_path curl_stderr curl_stdout query_string
 
   beekeeper_url="$1"
   beekeeper_path="$2"
+  beekeeper_tags="$3"
 
   curl_stdout_path="$(mktemp)"
   curl_stderr_path="$(mktemp)"
 
-  curl --silent --fail --verbose "$beekeeper_url/deployments/$beekeeper_path/latest" \
+  if [ "$beekeeper_tags" != "" ]; then
+    query_string="?tags=$beekeeper_tags"
+  fi
+
+  curl --silent --fail --verbose "$beekeeper_url/deployments/$beekeeper_path/latest$query_string" \
     1> "$curl_stdout_path" \
     2> "$curl_stderr_path"
 
@@ -173,14 +178,14 @@ get_docker_compose_json() {
 get_expected_image() {
   set -o pipefail
 
-  local beekeeper_path beekeeper_url current_image output
+  local beekeeper_path beekeeper_url beekeeper_tags current_image output
 
   beekeeper_url="$1"
   current_image="$2"
+  beekeeper_tags="$3"
   beekeeper_path="$(echo -n "$current_image" | sed -e 's/:.*//g')"
 
-
-  output="$(fetch_beekeeper "$beekeeper_url" "$beekeeper_path")" || return 1
+  output="$(fetch_beekeeper "$beekeeper_url" "$beekeeper_path" "$beekeeper_tags")" || return 1
   if [ -z "$output" ]; then
     return 0
   fi
@@ -211,9 +216,10 @@ get_services() {
 
 run() {
   debug "run"
-  local beekeeper_url docker_compose_yaml_path services
+  local beekeeper_url beekeeper_tags docker_compose_yaml_path services
   beekeeper_url="$1"
   docker_compose_yaml_path="$2"
+  beekeeper_tags="$3"
 
   debug "updating repository"
   git pull --quiet || return 1
@@ -222,7 +228,7 @@ run() {
 
   for service in "${services[@]}"; do
     debug "service: $service"
-    update_service "$beekeeper_url" "$docker_compose_yaml_path" "$service" || return 1
+    update_service "$beekeeper_url" "$docker_compose_yaml_path" "$service" "$beekeeper_tags" || return 1
   done
 
   if [ -z "$(git status --porcelain)" ]; then
@@ -236,13 +242,14 @@ run() {
 }
 
 run_forever() {
-  local beekeeper_url docker_compose_yaml_path interval
+  local beekeeper_url beekeeper_tags docker_compose_yaml_path interval
   interval="$1"
   beekeeper_url="$2"
   docker_compose_yaml_path="$3"
+  beekeeper_tags="$4"
 
   while true; do
-    run "$beekeeper_url" "$docker_compose_yaml_path" || exit 1
+    run "$beekeeper_url" "$docker_compose_yaml_path" "$beekeeper_tags" || exit 1
     debug "sleeping for ${interval}s"
     sleep "$interval"
   done
@@ -266,14 +273,15 @@ setup() {
 }
 
 update_service() {
-  local beekeeper_url current_image docker_compose_yaml_path expected_image service_name
+  local beekeeper_url beekeeper_tags current_image docker_compose_yaml_path expected_image service_name
 
   beekeeper_url="$1"
   docker_compose_yaml_path="$2"
   service_name="$3"
+  beekeeper_tags="$4"
 
   current_image="$(get_current_image "$docker_compose_yaml_path" "$service_name")" || return 1
-  expected_image="$(get_expected_image "$beekeeper_url" "$current_image")" || return 1
+  expected_image="$(get_expected_image "$beekeeper_url" "$current_image" "$beekeeper_tags")" || return 1
 
   if [ -z "$expected_image" ] || [ "$current_image" == "$expected_image" ]; then
     debug "up to date, skipping"
@@ -301,7 +309,7 @@ update_with_expected_image() {
 
 # main execution function
 main() {
-  local beekeeper_url docker_compose_yaml_path github_repo interval repo_dir single_run
+  local beekeeper_url beekeeper_tags docker_compose_yaml_path github_repo interval repo_dir single_run
   # Define args up here
   while [ "$1" != "" ]; do
     local param="$1"
@@ -317,6 +325,10 @@ main() {
         ;;
       -b | --beekeeper-url)
         beekeeper_url="$value"
+        shift
+        ;;
+      -t | --beekeeper-tags)
+        beekeeper_tags="$value"
         shift
         ;;
       -i | --interval)
@@ -361,6 +373,7 @@ main() {
   done
 
   beekeeper_url="${beekeeper_url:-$BEEKEEPER_URL}"
+  beekeeper_tags="${beekeeper_tags:-$BEEKEEPER_TAGS}"
   docker_compose_yaml_path="${docker_compose_yaml_path:-$DOCKER_COMPOSE_YAML_PATH}"
   github_repo="${github_repo:-$GITHUB_REPO}"
   interval="${interval:-$INTERVAL}"
@@ -381,7 +394,7 @@ main() {
     run "$beekeeper_url" "$docker_compose_yaml_path"
     exit $?
   fi
-  run_forever "$interval" "$beekeeper_url" "$docker_compose_yaml_path"
+  run_forever "$interval" "$beekeeper_url" "$docker_compose_yaml_path" "$beekeeper_tags"
 }
 
 main "$@"
